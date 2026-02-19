@@ -1,35 +1,69 @@
-#!/bin/bash
-{
-count=$(ls -1 crop* 2>/dev/null | wc -l)
-if [ "$count" != "0" ]
-then
-   for cropfile in crop*.png; 
-   do
-    rm "$(basename "$cropfile")"
-   done
+#!/usr/bin/env bash
+# -----------------------------------------------------------------------------
+# dotexslides.sh
+#
+# Build a simple Beamer presentation (slides.tex) from PNG screenshots.
+#
+# Usage:
+#   1) Place this script in a directory containing:
+#      - PNG screenshots (*.png)
+#      - a 'begin' file with the LaTeX header/preamble
+#      - an 'end' file with the LaTeX closing content
+#   2) Run:
+#        ./dotexslides.sh [FRAME_TITLE]
+#      Example:
+#        ./dotexslides.sh "My Demo Session"
+#   3) The script will:
+#      - remove previous crop*.png files
+#      - rename PNG files replacing spaces with underscores
+#      - crop each PNG to 1910x1060+0+150 using ImageMagick 'convert'
+#      - generate slides.tex with one frame per cropped image
+#
+# Notes:
+#   - If FRAME_TITLE is not provided, a default title is used.
+#
+# Requirements:
+#   - bash
+#   - ImageMagick (convert)
+# -----------------------------------------------------------------------------
+
+set -euo pipefail
+shopt -s nullglob
+
+frame_title="${1:-RNA-Seq Data Analysis with Galaxy}"
+
+# Ensure ImageMagick 'convert' is available.
+if ! command -v convert >/dev/null 2>&1; then
+  echo "Error: 'convert' (ImageMagick) is not installed or not in PATH." >&2
+  exit 1
 fi
 
-for file in *.png; do
-    convert "$(basename "$file")" -crop 1910x1060+0+150 "$(basename "crop $file")"
+# Clean previous cropped images from earlier runs.
+rm -f -- crop*.png
+
+# Normalize input filenames and crop each PNG.
+png_files=(*.png)
+for file in "${png_files[@]}"; do
+  safe_name="${file// /_}"
+  if [[ "$file" != "$safe_name" ]]; then
+    mv -- "$file" "$safe_name"
+  fi
+
+  convert -- "$safe_name" -crop 1910x1060+0+150 "crop_${safe_name}"
 done
 
-filename='begin'
-while IFS= read -r line; do
-	printf "%s\n" "$line"
-done < $filename
+# Build slides.tex by combining begin + generated frames + end.
+{
+  cat begin
 
-find . -type f -name "* *.png" -exec bash -c 'mv "$0" "${0// /_}"' {} \;
+  crop_files=(crop*.png)
+  for file in "${crop_files[@]}"; do
+    echo "\\begin{frame}{$frame_title}"
+    echo "\\includegraphics[height=5.8cm]{$file}"
+    echo '\\centering'
+    echo '\\end{frame}'
+    echo
+  done
 
-for files in crop*; do
-	echo '\\begin{frame}{RNA-Seq Data Analysis with Galaxy}'
-	echo "\includegraphics[height=5.8cm]{"$files"}"
-	echo '\\centering'
-	echo '\\end{frame}'
-	echo ""
-done
-
-filename='end'
-while IFS= read -r line; do
-        printf "%s\n" "$line"
-done < $filename
+  cat end
 } > slides.tex
